@@ -8,7 +8,6 @@
 #include <wrl/client.h>
 #include <string>
 #include <vector>
-#include <mutex>
 
 using Microsoft::WRL::ComPtr;
 
@@ -33,5 +32,4 @@ private:
     int height_ = 0;
     int fps_ = 60;
     bool initialized_ = false;
-    std::mutex writeMutex_;
 };

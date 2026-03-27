@@ -29,7 +29,6 @@ struct CaptureConfig {
     std::string outputPath;
     std::string audioOutputPath;
     std::string micOutputPath;
-    std::string micDeviceId;
     std::string micDeviceName;
     int fps = 60;
     int width = 0;
@@ -119,7 +118,6 @@ static bool parseSimpleJson(const std::string& json, CaptureConfig& config) {
 
     config.audioOutputPath = findString("audioOutputPath");
     config.micOutputPath = findString("micOutputPath");
-    config.micDeviceId = findString("micDeviceId");
     config.micDeviceName = findString("micDeviceName");
 
     auto findBool = [&](const std::string& key) -> bool {
@@ -251,7 +249,6 @@ int main(int argc, char* argv[]) {
 
     // Set up frame callback
     std::atomic<int64_t> frameCount{0};
-    std::atomic<bool> frameWriteFailed{false};
     session.setFrameCallback([&](ID3D11Texture2D* texture, int64_t timestampHns) {
         g_lastFrameTimestampHns = timestampHns;
         if (g_stopRequested) return;
@@ -273,12 +270,7 @@ int main(int argc, char* argv[]) {
 
         if (encoder.writeFrame(texture, adjustedTimestampHns)) {
             frameCount++;
-            return;
         }
-
-        frameWriteFailed = true;
-        g_stopRequested = true;
-        g_stopCv.notify_all();
     });
 
     // Start stdin listener
@@ -301,10 +293,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (config.captureMic && !config.micOutputPath.empty()) {
-        micInitialized = micCapture.initializeMic(
-            config.micOutputPath,
-            config.micDeviceId,
-            config.micDeviceName);
+        micInitialized = micCapture.initializeMic(config.micOutputPath, config.micDeviceName);
         if (!micInitialized) {
             std::cerr << "WARNING: Failed to initialize WASAPI mic capture" << std::endl;
         }
@@ -344,20 +333,7 @@ int main(int argc, char* argv[]) {
     session.stopCapture();
     if (audioActive) loopback.stop();
     if (micActive) micCapture.stop();
-    if (frameWriteFailed.load()) {
-        std::cerr << "ERROR: Failed to encode one or more video frames" << std::endl;
-        return 1;
-    }
-
-    if (frameCount.load() <= 0) {
-        std::cerr << "ERROR: No video frames were written" << std::endl;
-        return 1;
-    }
-
-    if (!encoder.finalize()) {
-        std::cerr << "ERROR: Failed to finalize Media Foundation encoder" << std::endl;
-        return 1;
-    }
+    encoder.finalize();
 
     std::cout << "Recording stopped. Output path: " << config.outputPath << std::endl;
     if (audioActive) {
