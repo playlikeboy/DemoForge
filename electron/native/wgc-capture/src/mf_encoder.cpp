@@ -124,7 +124,6 @@ bool MFEncoder::initialize(const std::wstring& outputPath, int width, int height
 }
 
 bool MFEncoder::writeFrame(ID3D11Texture2D* texture, int64_t timestampHns) {
-    std::lock_guard<std::mutex> lock(writeMutex_);
     if (!initialized_ || !sinkWriter_) return false;
 
     context_->CopyResource(stagingTexture_.Get(), texture);
@@ -191,7 +190,6 @@ bool MFEncoder::writeFrame(ID3D11Texture2D* texture, int64_t timestampHns) {
 }
 
 bool MFEncoder::finalize() {
-    std::lock_guard<std::mutex> lock(writeMutex_);
     if (!initialized_) return false;
     initialized_ = false;
 
