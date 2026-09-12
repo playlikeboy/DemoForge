@@ -529,6 +529,12 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 		const cursorFollowCameraRef = useRef<CursorFollowCameraState>(
 			createCursorFollowCameraState(),
 		);
+		/** Requests one exact composition after an output-affecting edit while paused. */
+		const requestPausedFrameRefresh = useCallback(() => {
+			if (!isPlayingRef.current) {
+				shouldSnapPausedFrameRef.current = true;
+			}
+		}, []);
 
 		const initializePixiRenderer = useCallback(
 			async (
@@ -1252,10 +1258,8 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 
 		useEffect(() => {
 			zoomRegionsRef.current = zoomRegions;
-			if (!isPlayingRef.current) {
-				shouldSnapPausedFrameRef.current = true;
-			}
-		}, [zoomRegions]);
+			requestPausedFrameRefresh();
+		}, [zoomRegions, requestPausedFrameRefresh]);
 
 		useEffect(() => {
 			selectedZoomIdRef.current = selectedZoomId;
@@ -1425,11 +1429,13 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 
 		useEffect(() => {
 			connectZoomsRef.current = connectZooms;
-		}, [connectZooms]);
+			requestPausedFrameRefresh();
+		}, [connectZooms, requestPausedFrameRefresh]);
 
 		useEffect(() => {
 			zoomInDurationMsRef.current = zoomInDurationMs;
-		}, [zoomInDurationMs]);
+			requestPausedFrameRefresh();
+		}, [zoomInDurationMs, requestPausedFrameRefresh]);
 
 		useEffect(() => {
 			zoomInOverlapMsRef.current = zoomInOverlapMs;
@@ -1437,7 +1443,8 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 
 		useEffect(() => {
 			zoomOutDurationMsRef.current = zoomOutDurationMs;
-		}, [zoomOutDurationMs]);
+			requestPausedFrameRefresh();
+		}, [zoomOutDurationMs, requestPausedFrameRefresh]);
 
 		useEffect(() => {
 			connectedZoomGapMsRef.current = connectedZoomGapMs;
@@ -1461,11 +1468,13 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 
 		useEffect(() => {
 			cursorTelemetryRef.current = cursorTelemetry;
-		}, [cursorTelemetry]);
+			requestPausedFrameRefresh();
+		}, [cursorTelemetry, requestPausedFrameRefresh]);
 
 		useEffect(() => {
 			showCursorRef.current = showCursor;
-		}, [showCursor]);
+			requestPausedFrameRefresh();
+		}, [showCursor, requestPausedFrameRefresh]);
 
 		useEffect(() => {
 			cursorStyleRef.current = cursorStyle;
@@ -1509,6 +1518,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 
 		useEffect(() => {
 			zoomMotionBlurRef.current = zoomMotionBlur;
+			requestPausedFrameRefresh();
 
 			const videoEffectsContainer = videoEffectsContainerRef.current;
 			const zoomBlurFilter = zoomBlurFilterRef.current;
@@ -1521,15 +1531,17 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 			motionBlurStateRef.current = createMotionBlurState();
 			videoEffectsContainer.filters =
 				zoomMotionBlur > 0 ? [motionBlurFilter, zoomBlurFilter] : null;
-		}, [zoomMotionBlur]);
+		}, [zoomMotionBlur, requestPausedFrameRefresh]);
 
 		useEffect(() => {
 			zoomMotionBlurTuningRef.current = zoomMotionBlurTuning;
-		}, [zoomMotionBlurTuning]);
+			requestPausedFrameRefresh();
+		}, [zoomMotionBlurTuning, requestPausedFrameRefresh]);
 
 		useEffect(() => {
 			zoomClassicModeRef.current = zoomClassicMode;
-		}, [zoomClassicMode]);
+			requestPausedFrameRefresh();
+		}, [zoomClassicMode, requestPausedFrameRefresh]);
 
 		useEffect(() => {
 			cursorMotionBlurRef.current = cursorMotionBlur;
@@ -1942,6 +1954,8 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 			video.pause();
 			video.currentTime = 0;
 			allowPlaybackRef.current = false;
+			lastRenderedContentTimeRef.current = null;
+			shouldSnapPausedFrameRef.current = true;
 			lockedVideoDimensionsRef.current = null;
 			setVideoReady(false);
 			if (videoReadyRafRef.current) {
