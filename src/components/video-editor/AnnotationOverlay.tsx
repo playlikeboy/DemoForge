@@ -40,6 +40,7 @@ function clampPercent(value: number) {
 	return Math.min(100, Math.max(0, value));
 }
 
+/** Render an annotation in preview space with editor drag and resize controls. */
 export function AnnotationOverlay({
 	annotation,
 	isSelected,
@@ -120,14 +121,14 @@ export function AnnotationOverlay({
 										? "flex-end"
 										: "center",
 							alignItems: "center",
-							padding: `${8 * sceneTransform.scale}px`,
+							padding: `${8 * sizeScale}px`,
 						}}
 					>
 						<span
 							style={{
 								color: annotation.style.color,
 								backgroundColor: annotation.style.backgroundColor,
-								fontSize: `${annotation.style.fontSize * sceneTransform.scale}px`,
+								fontSize: `${annotation.style.fontSize * sizeScale}px`,
 								fontFamily: annotation.style.fontFamily,
 								fontWeight: annotation.style.fontWeight,
 								fontStyle: annotation.style.fontStyle,
@@ -138,7 +139,7 @@ export function AnnotationOverlay({
 								boxDecorationBreak: "clone",
 								WebkitBoxDecorationBreak: "clone",
 								padding: "0.1em 0.2em",
-								borderRadius: `${4 * sceneTransform.scale}px`,
+								borderRadius: `${4 * sizeScale}px`,
 								lineHeight: "1.4",
 							}}
 						>
@@ -174,7 +175,10 @@ export function AnnotationOverlay({
 				}
 
 				return (
-					<div className="w-full h-full flex items-center justify-center p-2">
+					<div
+						className="w-full h-full flex items-center justify-center"
+						style={{ padding: `${8 * sizeScale}px` }}
+					>
 						{renderArrow()}
 					</div>
 				);
