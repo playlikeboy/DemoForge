@@ -73,31 +73,12 @@ std::wstring normalizeDeviceName(const std::wstring& value) {
     return result;
 }
 
-bool containsAsWords(const std::wstring& haystack, const std::wstring& needle) {
-    if (haystack.empty() || needle.empty()) return false;
-    size_t position = haystack.find(needle);
-    while (position != std::wstring::npos) {
-        const bool startsOnBoundary = position == 0 || haystack[position - 1] == L' ';
-        const size_t after = position + needle.size();
-        const bool endsOnBoundary = after == haystack.size() || haystack[after] == L' ';
-        if (startsOnBoundary && endsOnBoundary) return true;
-        position = haystack.find(needle, position + 1);
-    }
-    return false;
-}
-
-int scoreDeviceName(
+bool deviceNamesMatch(
     const std::wstring& candidateName,
-    const std::wstring& candidateId,
     const std::wstring& requestedName) {
     const std::wstring candidate = normalizeDeviceName(candidateName);
-    const std::wstring id = normalizeDeviceName(candidateId);
     const std::wstring requested = normalizeDeviceName(requestedName);
-    if (requested.empty()) return 0;
-    if (candidate == requested) return 1000;
-    if (containsAsWords(candidate, requested) || containsAsWords(requested, candidate)) return 900;
-    if (containsAsWords(id, requested) || containsAsWords(requested, id)) return 800;
-    return 0;
+    return !candidate.empty() && candidate == requested;
 }
 
 std::wstring getDeviceFriendlyName(IMMDevice* device) {
@@ -147,31 +128,20 @@ IMMDevice* WasapiCapture::findCaptureDeviceByName(const std::wstring& targetName
     UINT count = 0;
     collection->GetCount(&count);
 
-    IMMDevice* bestDevice = nullptr;
-    int bestScore = 0;
     for (UINT i = 0; i < count; i++) {
         IMMDevice* dev = nullptr;
         if (FAILED(collection->Item(i, &dev)) || !dev) continue;
 
-        LPWSTR rawId = nullptr;
-        std::wstring candidateId;
-        if (SUCCEEDED(dev->GetId(&rawId)) && rawId) {
-            candidateId = rawId;
-            CoTaskMemFree(rawId);
-        }
         const std::wstring candidateName = getDeviceFriendlyName(dev);
-        const int score = scoreDeviceName(candidateName, candidateId, targetName);
-        if (score > bestScore) {
-            if (bestDevice) bestDevice->Release();
-            bestDevice = dev;
-            bestScore = score;
-        } else {
-            dev->Release();
+        if (deviceNamesMatch(candidateName, targetName)) {
+            collection->Release();
+            return dev;
         }
+        dev->Release();
     }
 
     collection->Release();
-    return bestDevice;
+    return nullptr;
 }
 
 bool WasapiCapture::initializeLoopback(const std::string& outputPath) {
@@ -213,8 +183,8 @@ bool WasapiCapture::initializeMic(
         const bool wantedSpecificDevice =
             deviceId != "default" && (!deviceId.empty() || !deviceName.empty());
         if (wantedSpecificDevice) {
-            std::cerr << "WARNING: Requested microphone unavailable; using default WASAPI input"
-                      << std::endl;
+            std::cerr << "WARNING: Requested microphone unavailable" << std::endl;
+            return false;
         }
         hr = enumerator_->GetDefaultAudioEndpoint(eCapture, eConsole, &device_);
         if (FAILED(hr)) return false;
