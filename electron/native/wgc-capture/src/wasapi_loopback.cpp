@@ -4,6 +4,7 @@
 #include <cstring>
 #include <algorithm>
 #include <cmath>
+#include <cwctype>
 
 #pragma comment(lib, "ole32.lib")
 
@@ -54,6 +55,64 @@ int16_t pcm24ToInt16(const BYTE* sample) {
     }
     return static_cast<int16_t>(value >> 8);
 }
+
+std::wstring normalizeDeviceName(const std::wstring& value) {
+    std::wstring result;
+    result.reserve(value.size());
+    bool lastWasSpace = true;
+    for (const wchar_t character : value) {
+        if (std::iswalnum(character)) {
+            result.push_back(static_cast<wchar_t>(std::towlower(character)));
+            lastWasSpace = false;
+        } else if (!lastWasSpace) {
+            result.push_back(L' ');
+            lastWasSpace = true;
+        }
+    }
+    if (!result.empty() && result.back() == L' ') result.pop_back();
+    return result;
+}
+
+bool containsAsWords(const std::wstring& haystack, const std::wstring& needle) {
+    if (haystack.empty() || needle.empty()) return false;
+    size_t position = haystack.find(needle);
+    while (position != std::wstring::npos) {
+        const bool startsOnBoundary = position == 0 || haystack[position - 1] == L' ';
+        const size_t after = position + needle.size();
+        const bool endsOnBoundary = after == haystack.size() || haystack[after] == L' ';
+        if (startsOnBoundary && endsOnBoundary) return true;
+        position = haystack.find(needle, position + 1);
+    }
+    return false;
+}
+
+int scoreDeviceName(
+    const std::wstring& candidateName,
+    const std::wstring& candidateId,
+    const std::wstring& requestedName) {
+    const std::wstring candidate = normalizeDeviceName(candidateName);
+    const std::wstring id = normalizeDeviceName(candidateId);
+    const std::wstring requested = normalizeDeviceName(requestedName);
+    if (requested.empty()) return 0;
+    if (candidate == requested) return 1000;
+    if (containsAsWords(candidate, requested) || containsAsWords(requested, candidate)) return 900;
+    if (containsAsWords(id, requested) || containsAsWords(requested, id)) return 800;
+    return 0;
+}
+
+std::wstring getDeviceFriendlyName(IMMDevice* device) {
+    if (!device) return L"";
+    IPropertyStore* store = nullptr;
+    if (FAILED(device->OpenPropertyStore(STGM_READ, &store)) || !store) return L"";
+    PROPVARIANT value;
+    PropVariantInit(&value);
+    const HRESULT hr = store->GetValue(PKEY_Device_FriendlyName, &value);
+    std::wstring name;
+    if (SUCCEEDED(hr) && value.vt == VT_LPWSTR && value.pwszVal) name = value.pwszVal;
+    PropVariantClear(&value);
+    store->Release();
+    return name;
+}
 }
 
 static const CLSID CLSID_MMDeviceEnumerator_ = __uuidof(MMDeviceEnumerator);
@@ -88,28 +147,31 @@ IMMDevice* WasapiCapture::findCaptureDeviceByName(const std::wstring& targetName
     UINT count = 0;
     collection->GetCount(&count);
 
+    IMMDevice* bestDevice = nullptr;
+    int bestScore = 0;
     for (UINT i = 0; i < count; i++) {
         IMMDevice* dev = nullptr;
-        collection->Item(i, &dev);
+        if (FAILED(collection->Item(i, &dev)) || !dev) continue;
 
-        IPropertyStore* store = nullptr;
-        dev->OpenPropertyStore(STGM_READ, &store);
-        PROPVARIANT pv;
-        PropVariantInit(&pv);
-        store->GetValue(PKEY_Device_FriendlyName, &pv);
-        std::wstring name = pv.pwszVal ? pv.pwszVal : L"";
-        PropVariantClear(&pv);
-        store->Release();
-
-        if (name.find(targetName) != std::wstring::npos || targetName.find(name) != std::wstring::npos) {
-            collection->Release();
-            return dev;
+        LPWSTR rawId = nullptr;
+        std::wstring candidateId;
+        if (SUCCEEDED(dev->GetId(&rawId)) && rawId) {
+            candidateId = rawId;
+            CoTaskMemFree(rawId);
         }
-        dev->Release();
+        const std::wstring candidateName = getDeviceFriendlyName(dev);
+        const int score = scoreDeviceName(candidateName, candidateId, targetName);
+        if (score > bestScore) {
+            if (bestDevice) bestDevice->Release();
+            bestDevice = dev;
+            bestScore = score;
+        } else {
+            dev->Release();
+        }
     }
 
     collection->Release();
-    return nullptr;
+    return bestDevice;
 }
 
 bool WasapiCapture::initializeLoopback(const std::string& outputPath) {
@@ -127,7 +189,10 @@ bool WasapiCapture::initializeLoopback(const std::string& outputPath) {
     return initializeCommon();
 }
 
-bool WasapiCapture::initializeMic(const std::string& outputPath, const std::string& deviceName) {
+bool WasapiCapture::initializeMic(
+    const std::string& outputPath,
+    const std::string& deviceId,
+    const std::string& deviceName) {
     outputPath_ = outputPath;
     streamFlags_ = 0;
 
@@ -136,15 +201,23 @@ bool WasapiCapture::initializeMic(const std::string& outputPath, const std::stri
         IID_IMMDeviceEnumerator_, reinterpret_cast<void**>(&enumerator_));
     if (FAILED(hr)) return false;
 
-    if (!deviceName.empty()) {
+    if (!deviceId.empty() && deviceId != "default") {
+        const std::wstring requestedId = utf8ToWide(deviceId);
+        hr = enumerator_->GetDevice(requestedId.c_str(), &device_);
+        if (FAILED(hr)) device_ = nullptr;
+    }
+    if (!device_ && !deviceName.empty() && deviceId != "default") {
         device_ = findCaptureDeviceByName(utf8ToWide(deviceName));
     }
     if (!device_) {
-        hr = enumerator_->GetDefaultAudioEndpoint(eCapture, eCommunications, &device_);
-        if (FAILED(hr)) {
-            hr = enumerator_->GetDefaultAudioEndpoint(eCapture, eConsole, &device_);
-            if (FAILED(hr)) return false;
+        const bool wantedSpecificDevice =
+            deviceId != "default" && (!deviceId.empty() || !deviceName.empty());
+        if (wantedSpecificDevice) {
+            std::cerr << "WARNING: Requested microphone unavailable; using default WASAPI input"
+                      << std::endl;
         }
+        hr = enumerator_->GetDefaultAudioEndpoint(eCapture, eConsole, &device_);
+        if (FAILED(hr)) return false;
     }
 
     return initializeCommon();
