@@ -128,20 +128,27 @@ IMMDevice* WasapiCapture::findCaptureDeviceByName(const std::wstring& targetName
     UINT count = 0;
     collection->GetCount(&count);
 
+    IMMDevice* matchingDevice = nullptr;
     for (UINT i = 0; i < count; i++) {
         IMMDevice* dev = nullptr;
         if (FAILED(collection->Item(i, &dev)) || !dev) continue;
 
         const std::wstring candidateName = getDeviceFriendlyName(dev);
         if (deviceNamesMatch(candidateName, targetName)) {
-            collection->Release();
-            return dev;
+            if (matchingDevice) {
+                matchingDevice->Release();
+                dev->Release();
+                collection->Release();
+                return nullptr;
+            }
+            matchingDevice = dev;
+            continue;
         }
         dev->Release();
     }
 
     collection->Release();
-    return nullptr;
+    return matchingDevice;
 }
 
 bool WasapiCapture::initializeLoopback(const std::string& outputPath) {
